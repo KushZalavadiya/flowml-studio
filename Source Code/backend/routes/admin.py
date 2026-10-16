@@ -74,24 +74,30 @@ class UserStatusRequest(BaseModel):
 
 
 class SystemLimits(BaseModel):
-    execution_timeout_sec: int = Field(15, ge=1, le=120)
-    memory_limit_mb: int = Field(256, ge=64, le=2048)
-    max_upload_size_mb: int = Field(50, ge=1, le=500)
-    per_user_quota_datasets: int = Field(25, ge=1, le=500)
+    execution_timeout_sec: int = Field(120, ge=1, le=600)
+    memory_limit_mb: int = Field(1024, ge=64, le=8192)
+    max_upload_size_mb: int = Field(500, ge=1, le=2048)
+    per_user_quota_datasets: int = Field(100, ge=1, le=1000)
 
 
 def _get_limits_path() -> str:
     store = get_store()
-    return os.path.join(store.base_dir, "system_limits.json")
+    p1 = os.path.join(store.base_dir, "system_limits.json")
+    if os.path.exists(p1):
+        return p1
+    backend_limits = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "system_limits.json")
+    if os.path.exists(backend_limits):
+        return backend_limits
+    return p1
 
 
 def load_system_limits() -> Dict[str, Any]:
     path = _get_limits_path()
     defaults = {
-        "execution_timeout_sec": 15,
-        "memory_limit_mb": 256,
-        "max_upload_size_mb": 50,
-        "per_user_quota_datasets": 25,
+        "execution_timeout_sec": 120,
+        "memory_limit_mb": 1024,
+        "max_upload_size_mb": 500,
+        "per_user_quota_datasets": 100,
     }
     if os.path.exists(path):
         try:

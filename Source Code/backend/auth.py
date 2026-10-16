@@ -28,6 +28,9 @@ DEV_AUTH: bool = os.getenv("DEV_AUTH", "0") == "1"
 
 def _get_deactivated_path() -> str:
     base = os.getenv("FLOWML_STORAGE_DIR", "storage")
+    if not os.path.isabs(base):
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        base = os.path.join(backend_dir, base)
     return os.path.join(base, "deactivated_users.json")
 
 
@@ -204,11 +207,16 @@ async def get_current_user(
 
 
 async def get_current_admin(
-    creds: HTTPAuthorizationCredentials = Depends(_bearer),
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> str:
     """
     FastAPI dependency requiring admin privileges.
     """
+    if not creds or not creds.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token required.",
+        )
     token = creds.credentials
     admin_uid = verify_admin_session_token(token)
     if admin_uid:

@@ -202,36 +202,88 @@ export async function registerWithEmail(email, password, displayName = '') {
   };
 
   notifyDevListeners(sessionUser);
+
+  // Send branded verification email from flowmlstudio@gmail.com
+  try {
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+    fetch(`${apiBase}/api/auth/send-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: newUser.email, user_id: newUser.uid, app_url: window.location.origin }),
+    }).catch((err) => console.warn('Email verification dispatch:', err));
+  } catch (err) {
+    console.warn('Email dispatch failed:', err);
+  }
+
   return sessionUser;
 }
 
 /**
- * Reset password
+ * Reset password — dispatches reset instructions from flowmlstudio@gmail.com
  */
 export async function sendPasswordReset(email) {
+  try {
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+    await fetch(`${apiBase}/api/auth/send-password-reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, app_url: window.location.origin }),
+    });
+  } catch (err) {
+    console.warn('Backend password reset email warning:', err);
+  }
+
   if (!forceDevAuth) {
     return sendPasswordResetEmail(requireFirebaseAuth(), email);
   }
-  // Dev Mock — simulates sending email
-  await new Promise((r) => setTimeout(r, 600));
-  return { success: true, email };
+  return { success: true, email, sender: 'flowmlstudio@gmail.com' };
 }
 
 /**
- * Resend email verification
+ * Resend email verification — dispatches link from flowmlstudio@gmail.com
  */
-export async function sendVerification() {
+export async function sendVerification(targetEmail = null) {
+  const email = targetEmail || currentDevUser?.email || realAuth?.currentUser?.email;
+  const uid = currentDevUser?.uid || realAuth?.currentUser?.uid || 'user';
+  let emailResult = null;
+
+  if (email) {
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+      const resp = await fetch(`${apiBase}/api/auth/send-verification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, user_id: uid, app_url: window.location.origin }),
+      });
+      emailResult = await resp.json();
+    } catch (err) {
+      console.warn('Backend verification dispatch warning:', err);
+    }
+  }
+
   if (!forceDevAuth) {
     const auth = requireFirebaseAuth();
     if (!auth.currentUser) throw new Error('Sign in before requesting email verification.');
     return sendEmailVerification(auth.currentUser);
   }
-  // Dev Mock — marks verified or sends mock email
-  if (currentDevUser) {
+
+  return { success: true, sender: 'flowmlstudio@gmail.com', ...emailResult };
+}
+
+/**
+ * Mark user email as verified upon token confirmation
+ */
+export function markUserEmailVerified(email = null) {
+  if (currentDevUser && (!email || currentDevUser.email.toLowerCase() === email.toLowerCase())) {
     currentDevUser.emailVerified = true;
+    const users = getStoredUsers();
+    const idx = users.findIndex((u) => u.email.toLowerCase() === currentDevUser.email.toLowerCase());
+    if (idx !== -1) {
+      users[idx].emailVerified = true;
+      saveStoredUsers(users);
+    }
     notifyDevListeners({ ...currentDevUser });
   }
-  return { success: true };
 }
 
 /**

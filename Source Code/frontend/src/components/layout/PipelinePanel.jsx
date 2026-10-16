@@ -10,8 +10,9 @@ import {
   CheckCircle2, AlertCircle, Loader2, Settings, Info,
   CopyCheck, SlidersHorizontal, GitFork, Users, Divide, Shapes,
   BrainCircuit, FlaskConical, Code, Play, Terminal,
+  Link2, Globe, ExternalLink,
 } from 'lucide-react';
-import { uploadDataset, runPythonCode } from '../../services/api';
+import { uploadDataset, uploadDatasetFromUrl, runPythonCode } from '../../services/api';
 
 /* ─── Node type groups ───────────────────────────────────────────────────────── */
 const UPLOAD_TYPES     = ['upload', 'loadCsv', 'preview'];
@@ -127,7 +128,10 @@ const Msg = ({ type, text }) => {
 
 /* ─── Upload Config Panel ────────────────────────────────────────────────────── */
 function UploadConfig({ node, onUpdate }) {
+  const [tab, setTab] = useState(node.data.dataset_url ? 'link' : 'file');
   const [uploading, setUploading] = useState(false);
+  const [linkUrl, setLinkUrl] = useState(node.data.dataset_url || '');
+  const [importingLink, setImportingLink] = useState(false);
   const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
   const fileName = node.data.file_name;
@@ -139,7 +143,13 @@ function UploadConfig({ node, onUpdate }) {
     setMsg({ type: 'loading', text: `Uploading "${file.name}"…` });
     try {
       const r = await uploadDataset(file);
-      onUpdate(node.id, { file_name: r.file_name, _uploadedFile: null, _info: r, validationError: null });
+      onUpdate(node.id, {
+        dataset_id: r.dataset_id,
+        file_name: r.file_name,
+        _uploadedFile: null,
+        _info: r,
+        validationError: null,
+      });
       setMsg({ type: 'success', text: `✓ "${r.file_name}" — ${r.rows?.toLocaleString()} rows · ${r.columns} cols` });
     } catch (err) {
       setMsg({ type: 'error', text: err.message });
@@ -149,36 +159,179 @@ function UploadConfig({ node, onUpdate }) {
     }
   };
 
+  const handleLinkImport = async (e) => {
+    e?.preventDefault();
+    const cleanUrl = linkUrl.trim();
+    if (!cleanUrl) return;
+
+    setImportingLink(true);
+    setMsg({ type: 'loading', text: `Fetching dataset from link…` });
+    try {
+      const r = await uploadDatasetFromUrl(cleanUrl);
+      onUpdate(node.id, {
+        dataset_id: r.dataset_id,
+        file_name: r.file_name,
+        dataset_url: cleanUrl,
+        _uploadedFile: null,
+        _info: r,
+        validationError: null,
+      });
+      setMsg({ type: 'success', text: `✓ "${r.file_name}" — ${r.rows?.toLocaleString()} rows · ${r.columns} cols` });
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setImportingLink(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        Upload your CSV or Excel dataset here as the primary data source.
-      </p>
-
-      <div
-        className="border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all"
-        style={{ borderColor: uploading ? '#7C3AED' : 'var(--color-border)' }}
-        onClick={() => fileRef.current?.click()}
-        onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#7C3AED')}
-        onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-      >
-        {fileName ? (
-          <div>
-            <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-400" />
-            <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{fileName}</p>
-            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Click to replace file</p>
-          </div>
-        ) : (
-          <div>
-            <Upload className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
-            <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-              {uploading ? 'Uploading…' : 'Click to attach dataset'}
-            </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>CSV, XLSX, XLS supported</p>
-          </div>
-        )}
-        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFile} />
+      {/* Mode Switch Tabs */}
+      <div className="flex p-1 rounded-xl" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+        <button
+          type="button"
+          onClick={() => setTab('link')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+            tab === 'link' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Link2 className="w-3.5 h-3.5" />
+          GitHub / Kaggle Link
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('file')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+            tab === 'file' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Upload className="w-3.5 h-3.5" />
+          Local File
+        </button>
       </div>
+
+      {tab === 'link' ? (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+              Dataset URL (GitHub, Kaggle, Web)
+            </label>
+            <div className="relative">
+              <Globe className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="url"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://github.com/... or https://www.kaggle.com/datasets/..."
+                className="w-full pl-8 pr-3 py-2 rounded-xl text-xs font-mono border outline-none transition-all focus:border-primary"
+                style={{
+                  background: 'var(--color-bg)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)',
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Quick presets */}
+          <div>
+            <p className="text-[9px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Quick Presets</p>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const url = 'https://github.com/datasciencedojo/datasets/blob/master/titanic.csv';
+                  setLinkUrl(url);
+                }}
+                className="px-2 py-0.5 rounded text-[10px] border text-slate-300 hover:text-white hover:border-primary transition-all"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                Titanic (GitHub)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = 'https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv';
+                  setLinkUrl(url);
+                }}
+                className="px-2 py-0.5 rounded text-[10px] border text-slate-300 hover:text-white hover:border-primary transition-all"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                Iris (GitHub)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = 'https://www.kaggle.com/datasets/heptapod/titanic';
+                  setLinkUrl(url);
+                }}
+                className="px-2 py-0.5 rounded text-[10px] border text-slate-300 hover:text-white hover:border-primary transition-all"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                Titanic (Kaggle)
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLinkImport}
+            disabled={!linkUrl.trim() || importingLink}
+            className="w-full py-2 rounded-xl text-xs font-bold text-white shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all hover:opacity-95"
+            style={{ background: 'linear-gradient(135deg, #7C3AED, #6D28D9)' }}
+          >
+            {importingLink ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Accessing Dataset Link…
+              </>
+            ) : (
+              <>
+                <ExternalLink className="w-3.5 h-3.5" />
+                Access & Load Dataset
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <div
+          className="border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all"
+          style={{ borderColor: uploading ? '#7C3AED' : 'var(--color-border)' }}
+          onClick={() => fileRef.current?.click()}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#7C3AED')}
+          onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+        >
+          {fileName ? (
+            <div>
+              <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-400" />
+              <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{fileName}</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Click to replace file</p>
+            </div>
+          ) : (
+            <div>
+              <Upload className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                {uploading ? 'Uploading…' : 'Click to attach dataset'}
+              </p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>CSV, XLSX, XLS supported</p>
+            </div>
+          )}
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.tsv,.txt,*" className="hidden" onChange={handleFile} />
+        </div>
+      )}
+
+      {/* Info Badge if Dataset is Attached */}
+      {fileName && (
+        <div className="p-2.5 rounded-xl border flex items-center justify-between" style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center gap-2 truncate">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-xs font-mono font-semibold truncate" style={{ color: 'var(--color-text)' }}>{fileName}</span>
+          </div>
+          <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+            Attached
+          </span>
+        </div>
+      )}
 
       <AnimatePresence>
         {msg && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Msg {...msg} /></motion.div>}

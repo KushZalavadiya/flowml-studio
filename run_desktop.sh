@@ -19,9 +19,11 @@ echo "=========================================================="
 export DEV_AUTH=1
 export OFFLINE_MODE=1
 export MPLCONFIGDIR="${HOME:-/tmp}/.matplotlib"
-export FLOWML_STORAGE_DIR="storage"
+export FLOWML_STORAGE_DIR="$BACKEND_DIR/storage"
+export STORAGE_ROOT="$BACKEND_DIR/storage"
 
 mkdir -p "$MPLCONFIGDIR"
+mkdir -p "$STORAGE_ROOT"
 
 # 1. Start local FastAPI ML backend if not already listening on port 8000
 if lsof -i :8000 >/dev/null 2>&1; then
@@ -29,11 +31,11 @@ if lsof -i :8000 >/dev/null 2>&1; then
 else
     echo "[+] Booting FastAPI ML Engine on http://127.0.0.1:8000..."
     if [ -f "$UVICORN_BIN" ]; then
-        "$UVICORN_BIN" app:app --host 127.0.0.1 --port 8000 --app-dir "$BACKEND_DIR" >/dev/null 2>&1 &
+        (cd "$BACKEND_DIR" && "$UVICORN_BIN" app:app --host 127.0.0.1 --port 8000 --app-dir "$BACKEND_DIR" >/dev/null 2>&1 &)
     elif [ -f "$VENV_PYTHON" ]; then
-        "$VENV_PYTHON" -m uvicorn app:app --host 127.0.0.1 --port 8000 --app-dir "$BACKEND_DIR" >/dev/null 2>&1 &
+        (cd "$BACKEND_DIR" && "$VENV_PYTHON" -m uvicorn app:app --host 127.0.0.1 --port 8000 --app-dir "$BACKEND_DIR" >/dev/null 2>&1 &)
     else
-        python3 -m uvicorn app:app --host 127.0.0.1 --port 8000 --app-dir "$BACKEND_DIR" >/dev/null 2>&1 &
+        (cd "$BACKEND_DIR" && python3 -m uvicorn app:app --host 127.0.0.1 --port 8000 --app-dir "$BACKEND_DIR" >/dev/null 2>&1 &)
     fi
     BACKEND_PID=$!
     echo "[✓] Backend started (PID: $BACKEND_PID)"

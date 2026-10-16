@@ -98,6 +98,14 @@ def train_models(
         **(preprocessing_config or {}),
     }
 
+    # Ensure non-numeric feature columns are always encoded for ML estimators
+    non_numeric_cols = [col for col in X.columns if not pd.api.types.is_numeric_dtype(X[col])]
+    if non_numeric_cols:
+        if config.get("categorical_encoding") in (None, "none"):
+            config["categorical_encoding"] = "label"
+        if config.get("encoding_columns"):
+            config["encoding_columns"] = list(dict.fromkeys(list(config["encoding_columns"]) + non_numeric_cols))
+
     if config.get("remove_duplicates"):
         duplicate_columns = config.get("duplicate_columns")
         if duplicate_columns is None:
@@ -172,6 +180,14 @@ def train_models(
             X, y, test_size=test_size, random_state=random_state
         )
 
+    # Large dataset guard: For O(N^2) memory/compute models (SVM, KNN), subsample if > 25,000 rows
+    is_expensive_model = selected_model and any(m in selected_model.lower() for m in ["svm", "svr", "knn"])
+    if is_expensive_model and len(X_train) > 25_000:
+        log_event(f"Large dataset detected ({len(X_train)} train rows). Subsampling 25,000 rows for {selected_model} to ensure fast training.")
+        sample_indices = X_train.sample(n=25_000, random_state=random_state).index
+        X_train = X_train.loc[sample_indices]
+        y_train = y_train.loc[sample_indices]
+
     config["target_column"] = "__flowml_target__"
     train_frame = X_train.copy()
     train_frame[config["target_column"]] = y_train
@@ -185,6 +201,26 @@ def train_models(
     if missing_transformed:
         raise ValueError(f"Preprocessing did not produce expected features: {missing_transformed}")
     X_test_processed = X_test_processed[expected_features]
+
+    # Guard: Ensure all columns in X_train_processed and X_test_processed are strictly numeric
+    for col in X_train_processed.columns:
+        if not pd.api.types.is_numeric_dtype(X_train_processed[col]):
+            le = LabelEncoder()
+            X_train_processed[col] = le.fit_transform(X_train_processed[col].astype(str))
+            known = set(le.classes_)
+            X_test_processed[col] = X_test_processed[col].astype(str).apply(
+                lambda val: int(le.transform([val])[0]) if val in known else -1
+            )
+            if "label_encoders" not in transformers:
+                transformers["label_encoders"] = {}
+            transformers["label_encoders"][col] = le
+            transformers["encoding"] = transformers.get("encoding") or "label"
+
+    # Guard: Impute any remaining NaNs in numeric features
+    if X_train_processed.isna().any().any():
+        medians = X_train_processed.median(numeric_only=True).fillna(0)
+        X_train_processed = X_train_processed.fillna(medians)
+        X_test_processed = X_test_processed.fillna(medians)
 
     model_zoo = MODEL_ZOOS[task_type]
     if selected_model:
@@ -250,11 +286,36 @@ def train_models(
                 score = accuracy
             else:
                 mse = float(mean_squared_error(y_test, predictions))
+                mae = float(mean_absolute_error(y_test, predictions))
+                rmse = float(np.sqrt(mse))
+                r2_val = float(r2_score(y_test, predictions)) if len(y_test) > 1 else None
+
+                # Calculate percentage-based accuracy and precision factors for regression
+                r2_acc = max(0.0, min(1.0, r2_val)) if r2_val is not None else 0.0
+                denom = np.maximum(np.abs(y_test), 1e-6)
+                relative_errors = np.abs((y_test - predictions) / denom)
+                mape = float(np.mean(relative_errors))
+                mape_acc = max(0.0, min(1.0, 1.0 - mape))
+
+                # Precision: proportion of predictions within ±15%, ±10%, and ±20% tolerance
+                precision_15 = float(np.mean(relative_errors <= 0.15))
+                precision_10 = float(np.mean(relative_errors <= 0.10))
+                precision_20 = float(np.mean(relative_errors <= 0.20))
+
+                # Intuitive accuracy: variance explained when positive, otherwise closeness (1 - MAPE)
+                reg_accuracy = r2_acc if (r2_val is not None and r2_val > 0) else mape_acc
+
                 metrics = {
-                    "mae": float(mean_absolute_error(y_test, predictions)),
+                    "accuracy": reg_accuracy,
+                    "precision": precision_15,
+                    "tolerance_precision": precision_15,
+                    "tolerance_10": precision_10,
+                    "tolerance_20": precision_20,
+                    "mape": mape,
+                    "mae": mae,
                     "mse": mse,
-                    "rmse": float(np.sqrt(mse)),
-                    "r2": float(r2_score(y_test, predictions)) if len(y_test) > 1 else None,
+                    "rmse": rmse,
+                    "r2": r2_val,
                 }
                 score = mse
 

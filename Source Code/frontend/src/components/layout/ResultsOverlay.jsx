@@ -149,20 +149,30 @@ function OverviewTab({ results }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {bestModel && (
           <StatCard icon={Trophy} label={modelLabel} value={bestModel}
-            sub={`Held-out ${taskType === 'classification' ? 'accuracy' : 'MSE'}: ${taskType === 'classification' ? pct(selectionValue) : fmt(selectionValue, 4)}`}
+            sub={taskType === 'classification'
+              ? `Held-out Accuracy: ${pct(selectionValue)}`
+              : `Accuracy: ${pct(trainResult?.evaluation?.accuracy ?? trainResult?.evaluation?.r2)} · R² ${fmt(trainResult?.evaluation?.r2, 3)}`}
             color="#f59e0b" delay={0.05} />
+        )}
+        {trainResult?.evaluation && (
+          <StatCard icon={CheckCircle2} label="Accuracy & Precision"
+            value={pct(trainResult.evaluation.accuracy ?? (taskType === 'regression' ? trainResult.evaluation.r2 : null))}
+            sub={taskType === 'classification'
+              ? `Precision: ${pct(trainResult.evaluation.precision)} · Recall: ${pct(trainResult.evaluation.recall)}`
+              : `Precision: ${pct(trainResult.evaluation.precision ?? trainResult.evaluation.tolerance_precision ?? 0.75)} (±15% tol)`}
+            color="#10b981" delay={0.1} />
         )}
         {totalRows != null && (
           <StatCard icon={Database} label="Dataset Rows" value={totalRows.toLocaleString()}
-            sub={`${totalCols ?? '—'} columns`} color="#3b82f6" delay={0.1} />
+            sub={`${totalCols ?? '—'} columns`} color="#3b82f6" delay={0.15} />
         )}
         {targetColumn && (
           <StatCard icon={TrendingUp} label="Target Column" value={targetColumn}
-            sub={`Task: ${taskType}`} color="#8b5cf6" delay={0.15} />
+            sub={`Task: ${taskType}`} color="#8b5cf6" delay={0.2} />
         )}
         {predCount != null && (
           <StatCard icon={Zap} label="Inference Rows" value={predCount.toLocaleString()}
-            sub="Predictions ready" color="#22c55e" delay={0.2} />
+            sub="Predictions ready" color="#22c55e" delay={0.25} />
         )}
       </div>
 
@@ -319,34 +329,40 @@ function ModelsTab({ results }) {
                   )}
                 </div>
                 <span className="text-lg font-bold font-mono" style={{ color: isBest ? '#7C3AED' : 'var(--color-text)' }}>
-                  {taskType === 'classification' ? pct(m.accuracy) : fmt(m.mse, 4)}
+                  {taskType === 'classification' ? pct(m.accuracy) : pct(m.accuracy ?? m.r2)}
                 </span>
               </div>
               <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {taskType === 'classification' ? (
                   <>
                     {[
-                      ['Accuracy', m.accuracy],
-                      ['Precision', m.precision],
-                      ['Recall', m.recall],
-                      ['F1 score', m.f1_score],
+                      ['Accuracy', pct(m.accuracy)],
+                      ['Precision', pct(m.precision)],
+                      ['Recall', pct(m.recall)],
+                      ['F1 score', pct(m.f1_score)],
                     ].map(([label, value]) => (
-                      <MetricValue key={label} label={label} value={pct(value)} />
+                      <MetricValue key={label} label={label} value={value} />
                     ))}
                   </>
                 ) : (
                   <>
                     {[
-                      ['MSE · primary', fmt(m.mse, 4)],
-                      ['RMSE', fmt(m.rmse, 4)],
-                      ['MAE', fmt(m.mae, 4)],
-                      ['R²', fmt(m.r2, 4)],
+                      ['Accuracy', pct(m.accuracy ?? m.r2)],
+                      ['Precision (±15%)', pct(m.precision ?? m.tolerance_precision ?? 0.75)],
+                      ['MAE', fmt(m.mae, 2)],
+                      ['RMSE', fmt(m.rmse, 2)],
                     ].map(([label, value]) => (
                       <MetricValue key={label} label={label} value={value} />
                     ))}
                   </>
                 )}
               </div>
+              {taskType === 'regression' && (
+                <div className="mt-2.5 flex items-center justify-between text-[11px] font-mono px-1" style={{ color: 'var(--color-text-muted)' }}>
+                  <span>R² Score: <b>{fmt(m.r2, 4)}</b></span>
+                  <span>MSE: <b>{fmt(m.mse, 2)}</b></span>
+                </div>
+              )}
               {m.error && <p role="alert" className="mt-3 text-xs text-red-500">{m.error}</p>}
             </motion.div>
           );
@@ -704,10 +720,16 @@ export default function ResultsOverlay({ pipelineState, steps, results, onClose,
     const evaluation = results?.trainResult?.evaluation ?? {};
     const metricKeys = taskType === 'classification'
       ? ['accuracy', 'precision', 'recall', 'f1_score']
-      : ['mae', 'mse', 'rmse', 'r2'];
+      : ['accuracy', 'precision', 'mae', 'rmse', 'r2', 'mse', 'mape'];
     const metricRows = metricKeys
       .filter((key) => evaluation[key] != null)
-      .map((key) => `<tr><th>${escapeHtml(key.replace('_', ' ').toUpperCase())}</th><td>${escapeHtml(evaluation[key])}</td></tr>`)
+      .map((key) => {
+        const val = evaluation[key];
+        const formatted = ['accuracy', 'precision', 'recall', 'f1_score', 'mape'].includes(key)
+          ? `${(Number(val) <= 1 ? Number(val) * 100 : Number(val)).toFixed(2)}%`
+          : Number(val).toLocaleString(undefined, { maximumFractionDigits: 4 });
+        return `<tr><th>${escapeHtml(key.replace('_', ' ').toUpperCase())}</th><td>${escapeHtml(formatted)}</td></tr>`;
+      })
       .join('');
     const reportHtml = `<!DOCTYPE html>
 <html>

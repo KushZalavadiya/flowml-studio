@@ -34,6 +34,10 @@ def generate_correlation_heatmap(df: pd.DataFrame) -> str:
         log_event("Not enough numeric columns for heatmap.", level="WARNING")
         return ""
 
+    # Sample up to 50,000 rows for large datasets to keep correlation calculation fast
+    if len(numeric_df) > 50_000:
+        numeric_df = numeric_df.sample(50_000, random_state=42)
+
     n = numeric_df.shape[1]
     fig_w = min(14, n + 2)
     fig_h = min(12, n + 1)
@@ -60,6 +64,10 @@ def generate_distribution_plots(df: pd.DataFrame) -> str:
     if numeric_df.empty:
         return ""
 
+    # Sample up to 20,000 rows for distribution plots (sufficient for 30 bins, stays within numpy chunk limit)
+    if len(numeric_df) > 20_000:
+        numeric_df = numeric_df.sample(20_000, random_state=42)
+
     cols = numeric_df.columns[: min(9, len(numeric_df.columns))]
     n    = len(cols)
     ncols = min(3, n)
@@ -69,7 +77,10 @@ def generate_distribution_plots(df: pd.DataFrame) -> str:
     axes = np.array(axes).flatten()
 
     for i, col in enumerate(cols):
-        axes[i].hist(numeric_df[col].dropna(), bins=30, color="#4F8EF7", edgecolor="white", alpha=0.85)
+        vals = numeric_df[col].dropna().to_numpy(dtype=float)
+        if len(vals) > 0:
+            n_bins = min(30, max(5, len(np.unique(vals[:500]))))
+            axes[i].hist(vals, bins=n_bins, color="#4F8EF7", edgecolor="white", alpha=0.85)
         axes[i].set_title(col, fontsize=10, fontweight="bold")
         axes[i].grid(axis="y", alpha=0.3)
         axes[i].set_xlabel("")

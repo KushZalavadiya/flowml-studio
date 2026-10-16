@@ -69,9 +69,12 @@ export default function ForgotPassword() {
           <h1 className="font-display text-2xl font-bold tracking-tight mb-2 text-[#1F1B2E]">
             Reset your password
           </h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="text-sm mb-3" style={{ color: 'var(--color-text-muted)' }}>
             Enter your email and we'll send you instructions to reset your account password.
           </p>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-purple-500/10 border border-purple-500/20 text-purple-400">
+            <span>Sent from: <strong>flowmlstudio@gmail.com</strong></span>
+          </div>
         </div>
 
         {submitted ? (
@@ -80,7 +83,7 @@ export default function ForgotPassword() {
               <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold text-sm text-emerald-300 mb-1">Reset Link Sent!</p>
-                <p>We've sent password reset instructions to <span className="font-mono font-semibold">{email}</span>. Please check your inbox and spam folder.</p>
+                <p>We've sent password reset instructions to <span className="font-mono font-semibold">{email}</span> from <strong className="text-purple-300">flowmlstudio@gmail.com</strong>. Please check your inbox and spam folder.</p>
               </div>
             </div>
 

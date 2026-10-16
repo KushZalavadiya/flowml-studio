@@ -11,7 +11,7 @@ from auth import get_current_user
 
 # Import routers
 from routes import upload, analyze, preprocess, train, predict, visualize, pipeline
-from routes import runs, code, admin, account, hub
+from routes import runs, code, admin, account, hub, auth_email
 from utils.logger import stream_logs, log_event
 
 app = FastAPI(title="FlowML Backend")
@@ -46,6 +46,7 @@ app.include_router(admin.router,      prefix="/api", tags=["Admin Governance"])
 app.include_router(account.router,    prefix="/api", tags=["Account Governance"])
 app.include_router(hub.router,        prefix="/api", tags=["Community Pipeline Hub"])
 app.include_router(hub.router,        prefix="/api/hub", tags=["Community Pipeline Hub"])
+app.include_router(auth_email.router, prefix="/api", tags=["Email & Verification"])
 
 
 @app.exception_handler(Exception)

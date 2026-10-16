@@ -134,8 +134,8 @@ function startBackendIfNeeded(callback) {
             DEV_AUTH: '1',
             OFFLINE_MODE: '1',
             MPLCONFIGDIR: path.join(process.env.HOME || '/tmp', '.matplotlib'),
-            STORAGE_ROOT: 'storage',
-            FLOWML_STORAGE_DIR: 'storage',
+            STORAGE_ROOT: path.join(backendDir, 'storage'),
+            FLOWML_STORAGE_DIR: path.join(backendDir, 'storage'),
           },
         }
       );

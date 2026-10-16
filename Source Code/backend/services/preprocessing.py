@@ -123,7 +123,7 @@ def apply_transformers(df: pd.DataFrame, transformers: dict) -> pd.DataFrame:
 
     # ── Label encoding ───────────────────────────────────────────────────────
     encoding = transformers.get("encoding")
-    if encoding == "label" and "label_encoders" in transformers:
+    if "label_encoders" in transformers and transformers["label_encoders"]:
         for col, le in transformers["label_encoders"].items():
             if col in df.columns:
                 known = set(le.classes_)

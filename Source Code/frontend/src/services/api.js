@@ -62,8 +62,6 @@ api.interceptors.response.use(
         msg = typeof detail === 'string' ? detail : 'File exceeds maximum upload size (50MB).';
       } else if (status === 429) {
         msg = typeof detail === 'string' ? detail : 'Too many requests. Please wait a moment and try again.';
-      } else if (status >= 500) {
-        msg = 'The server could not complete the request. Please try again shortly.';
       } else if (typeof detail === 'object' && detail !== null) {
         const summary = detail.error || detail.message;
         msg = summary && detail.details
@@ -71,6 +69,8 @@ api.interceptors.response.use(
           : summary || detail.details || 'Server processed request with errors.';
       } else if (typeof detail === 'string') {
         msg = detail;
+      } else if (status >= 500) {
+        msg = 'The server could not complete the request. Please try again shortly.';
       } else if (data?.message) {
         msg = data.message;
       } else {
@@ -100,6 +100,12 @@ export const uploadDataset = (file, onProgress) => {
     })
     .then((r) => r.data);
 };
+
+/** POST /api/upload-url — download & access dataset from GitHub, Kaggle, or web URL */
+export const uploadDatasetFromUrl = (url, fileName = null) =>
+  api
+    .post('/api/upload-url', { url, file_name: fileName })
+    .then((r) => r.data);
 
 /** GET /api/datasets — list caller's uploaded datasets */
 export const listDatasets = () => api.get('/api/datasets').then((r) => r.data);
@@ -374,5 +380,39 @@ export const exportCommunityPipelineUrl = (pipelineId) =>
 /** POST /api/community/pipelines/import */
 export const importCommunityPipeline = (pipelineData) =>
   api.post('/api/community/pipelines/import', pipelineData).then((r) => r.data);
+
+/* ─── Email & Verification Endpoints (flowmlstudio@gmail.com) ─────────────────── */
+
+/** POST /api/auth/send-verification — Dispatches verification link from flowmlstudio@gmail.com */
+export const sendVerificationEmail = (email, userId = null, appUrl = window.location.origin) =>
+  api.post('/api/auth/send-verification', {
+    email,
+    user_id: userId,
+    app_url: appUrl,
+  }).then((r) => r.data);
+
+/** POST /api/auth/verify-token — Verifies account using token */
+export const verifyEmailToken = (token) =>
+  api.post('/api/auth/verify-token', { token }).then((r) => r.data);
+
+/** POST /api/auth/send-password-reset — Sends password reset link from flowmlstudio@gmail.com */
+export const sendPasswordResetEmail = (email, appUrl = window.location.origin) =>
+  api.post('/api/auth/send-password-reset', {
+    email,
+    app_url: appUrl,
+  }).then((r) => r.data);
+
+/** POST /api/auth/send-project-update — Sends pipeline/training updates from flowmlstudio@gmail.com */
+export const sendProjectUpdateEmail = ({ email, projectName, updateType = 'Pipeline Run', details = {} }) =>
+  api.post('/api/auth/send-project-update', {
+    email,
+    project_name: projectName,
+    update_type: updateType,
+    details,
+  }).then((r) => r.data);
+
+/** GET /api/auth/email-service — Returns sender flowmlstudio@gmail.com and service status */
+export const getEmailServiceStatus = () =>
+  api.get('/api/auth/email-service').then((r) => r.data);
 
 export default api;

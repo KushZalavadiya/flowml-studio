@@ -27,13 +27,26 @@ def analyze_dataset(df: pd.DataFrame) -> dict:
     numeric_columns = df.select_dtypes(include="number").columns.tolist()
     categorical_columns = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
 
-    # Unique value counts per column
-    unique_counts = {col: int(df[col].nunique()) for col in df.columns}
+    # Unique value counts per column (optimized for large datasets with lakhs of records)
+    unique_counts = {}
+    is_large = row_count > 100_000
+    sample_df = df.sample(min(50_000, row_count), random_state=42) if is_large else df
+
+    for col in df.columns:
+        if is_large and df[col].dtype == "object":
+            # Fast approximation on representative sample
+            sampled_nunique = int(sample_df[col].nunique())
+            unique_counts[col] = sampled_nunique
+        else:
+            unique_counts[col] = int(df[col].nunique())
 
     # Detect likely ID / high-cardinality text columns (>90 % unique values among non-numeric)
     possible_id_columns = [
         col for col in categorical_columns
-        if row_count > 0 and df[col].nunique() / row_count > 0.9
+        if row_count > 0 and (
+            (unique_counts.get(col, 0) / len(sample_df) > 0.9) if is_large
+            else (unique_counts.get(col, 0) / row_count > 0.9)
+        )
     ]
 
     # Suggested target column

@@ -25,7 +25,16 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
-_BASE_STORAGE_ROOT = os.getenv("STORAGE_ROOT", "storage")
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+def _resolve_storage_root(root: str | None = None) -> Path:
+    raw = root or os.getenv("STORAGE_ROOT", "storage")
+    p = Path(raw)
+    if not p.is_absolute():
+        return (_BACKEND_DIR / p).resolve()
+    return p.resolve()
+
+_BASE_STORAGE_ROOT = str(_resolve_storage_root())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -112,7 +121,7 @@ class LocalDiskStore(StoreBackend):
     """File-system store under storage/{uid}/..."""
 
     def __init__(self, root: str = _BASE_STORAGE_ROOT):
-        self._root = Path(root).resolve()
+        self._root = _resolve_storage_root(root)
 
     @property
     def base_dir(self) -> str:
@@ -140,9 +149,75 @@ class LocalDiskStore(StoreBackend):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def _find_dataset_dir(self, uid: str, dataset_id: str) -> Path | None:
+        """Find dataset directory for uid, with fallback across locations for same uid, or for desktop_offline_user."""
+        # 1. Primary check for this uid
+        try:
+            p = self._safe_path(uid, "datasets", dataset_id)
+            if (p / "meta.json").exists():
+                return p
+        except Exception:
+            pass
+
+        # 2. Check alternate storage roots for the SAME uid
+        alt_roots = [
+            self._root.parent.parent / "storage",
+            self._root.parent / "storage",
+            Path(__file__).resolve().parent.parent / "storage",
+            Path(__file__).resolve().parent.parent.parent.parent / "storage",
+        ]
+        for alt in alt_roots:
+            try:
+                alt_res = alt.resolve()
+                if alt_res != self._root and alt_res.exists():
+                    cand = alt_res / _sanitise_uid(uid) / "datasets" / dataset_id
+                    if (cand / "meta.json").exists():
+                        return cand
+            except Exception:
+                continue
+
+        # 3. If caller is desktop_offline_user, allow cross-access to other local datasets
+        if uid == "desktop_offline_user":
+            if self._root.exists():
+                for u_dir in self._root.iterdir():
+                    if u_dir.is_dir():
+                        cand = u_dir / "datasets" / dataset_id
+                        if (cand / "meta.json").exists():
+                            return cand
+            for alt in alt_roots:
+                try:
+                    alt_res = alt.resolve()
+                    if alt_res != self._root and alt_res.exists():
+                        for u_dir in alt_res.iterdir():
+                            if u_dir.is_dir():
+                                cand = u_dir / "datasets" / dataset_id
+                                if (cand / "meta.json").exists():
+                                    return cand
+                except Exception:
+                    continue
+        else:
+            # Check if dataset was saved under desktop_offline_user
+            cand = self._root / "desktop_offline_user" / "datasets" / dataset_id
+            if (cand / "meta.json").exists():
+                return cand
+            for alt in alt_roots:
+                try:
+                    alt_res = alt.resolve()
+                    if alt_res != self._root and alt_res.exists():
+                        cand = alt_res / "desktop_offline_user" / "datasets" / dataset_id
+                        if (cand / "meta.json").exists():
+                            return cand
+                except Exception:
+                    continue
+
+        return None
+
     # ── path helpers ──────────────────────────────────────────────────────────
 
     def dataset_path(self, uid: str, dataset_id: str) -> str:
+        found = self._find_dataset_dir(uid, dataset_id)
+        if found:
+            return str(found)
         return str(self._safe_path(uid, "datasets", dataset_id))
 
     def model_path(self, uid: str, model_id: str) -> str:
@@ -170,17 +245,20 @@ class LocalDiskStore(StoreBackend):
         return str(dest_file)
 
     def get_dataset_path(self, uid: str, dataset_id: str) -> str:
-        ds_dir = self._safe_path(uid, "datasets", dataset_id)
-        meta_path = ds_dir / "meta.json"
-        if not meta_path.exists():
+        ds_dir = self._find_dataset_dir(uid, dataset_id)
+        if not ds_dir or not (ds_dir / "meta.json").exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Dataset '{dataset_id}' not found.",
             )
+        meta_path = ds_dir / "meta.json"
         with open(meta_path) as f:
             meta = json.load(f)
-        full_path = ds_dir / meta["file"]
+        full_path = ds_dir / meta.get("file", "")
         if not full_path.exists():
+            for f in ds_dir.iterdir():
+                if f.is_file() and f.name != "meta.json" and not f.name.startswith("."):
+                    return str(f)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Dataset file missing for '{dataset_id}'.",
@@ -188,7 +266,10 @@ class LocalDiskStore(StoreBackend):
         return str(full_path)
 
     def update_dataset_meta(self, uid: str, dataset_id: str, updates: dict) -> None:
-        ds_dir = self._safe_path(uid, "datasets", dataset_id)
+        ds_dir = self._find_dataset_dir(uid, dataset_id)
+        if not ds_dir:
+            ds_dir = self._safe_path(uid, "datasets", dataset_id)
+            self._ensure(ds_dir)
         meta_path = ds_dir / "meta.json"
         existing: dict = {}
         if meta_path.exists():
@@ -199,31 +280,74 @@ class LocalDiskStore(StoreBackend):
             json.dump(existing, f)
 
     def get_dataset_meta(self, uid: str, dataset_id: str) -> dict:
-        ds_dir = self._safe_path(uid, "datasets", dataset_id)
-        meta_path = ds_dir / "meta.json"
-        if not meta_path.exists():
+        ds_dir = self._find_dataset_dir(uid, dataset_id)
+        if not ds_dir or not (ds_dir / "meta.json").exists():
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
-        with open(meta_path) as f:
+        with open(ds_dir / "meta.json") as f:
             return json.load(f)
 
     def list_datasets(self, uid: str) -> list[dict]:
-        datasets_root = self._safe_path(uid, "datasets")
-        if not datasets_root.exists():
-            return []
+        seen_ids = set()
         result = []
-        for ds_dir in sorted(datasets_root.iterdir()):
-            if ds_dir.is_dir():
-                meta_path = ds_dir / "meta.json"
-                if meta_path.exists():
-                    with open(meta_path) as f:
-                        meta = json.load(f)
-                    meta["dataset_id"] = ds_dir.name
-                    result.append(meta)
+
+        def _scan_dir(datasets_root: Path):
+            if not datasets_root.exists():
+                return
+            for ds_dir in sorted(datasets_root.iterdir()):
+                if ds_dir.is_dir() and ds_dir.name not in seen_ids:
+                    meta_path = ds_dir / "meta.json"
+                    if meta_path.exists():
+                        try:
+                            with open(meta_path) as f:
+                                meta = json.load(f)
+                            meta["dataset_id"] = ds_dir.name
+                            seen_ids.add(ds_dir.name)
+                            result.append(meta)
+                        except Exception:
+                            pass
+
+        # 1. Primary user root
+        try:
+            _scan_dir(self._safe_path(uid, "datasets"))
+        except Exception:
+            pass
+
+        # 2. Check alternate storage roots for same uid
+        alt_roots = [
+            self._root.parent.parent / "storage",
+            self._root.parent / "storage",
+            Path(__file__).resolve().parent.parent / "storage",
+            Path(__file__).resolve().parent.parent.parent.parent / "storage",
+        ]
+        for alt in alt_roots:
+            try:
+                alt_res = alt.resolve()
+                if alt_res != self._root and alt_res.exists():
+                    _scan_dir(alt_res / _sanitise_uid(uid) / "datasets")
+            except Exception:
+                continue
+
+        # 3. If caller is desktop_offline_user, include all other local datasets
+        if uid == "desktop_offline_user":
+            if self._root.exists():
+                for u_dir in self._root.iterdir():
+                    if u_dir.is_dir():
+                        _scan_dir(u_dir / "datasets")
+            for alt in alt_roots:
+                try:
+                    alt_res = alt.resolve()
+                    if alt_res != self._root and alt_res.exists():
+                        for u_dir in alt_res.iterdir():
+                            if u_dir.is_dir():
+                                _scan_dir(u_dir / "datasets")
+                except Exception:
+                    continue
+
         return result
 
     def delete_dataset(self, uid: str, dataset_id: str) -> None:
-        ds_dir = self._safe_path(uid, "datasets", dataset_id)
-        if not ds_dir.exists():
+        ds_dir = self._find_dataset_dir(uid, dataset_id)
+        if not ds_dir or not ds_dir.exists():
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
         shutil.rmtree(ds_dir)
 

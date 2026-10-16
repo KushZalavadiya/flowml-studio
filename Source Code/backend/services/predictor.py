@@ -279,11 +279,32 @@ def predict_with_store(
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Regression test target must be numeric: {exc}") from exc
             mse = float(mean_squared_error(actual_values, raw_preds[labeled_mask]))
+            mae = float(mean_absolute_error(actual_values, raw_preds[labeled_mask]))
+            rmse = float(np.sqrt(mse))
+            r2_val = float(r2_score(actual_values, raw_preds[labeled_mask])) if len(actual_values) > 1 else None
+
+            # Calculate percentage-based accuracy and precision factors for regression
+            r2_acc = max(0.0, min(1.0, r2_val)) if r2_val is not None else 0.0
+            denom = np.maximum(np.abs(actual_values), 1e-6)
+            relative_errors = np.abs((actual_values - raw_preds[labeled_mask]) / denom)
+            mape = float(np.mean(relative_errors))
+            mape_acc = max(0.0, min(1.0, 1.0 - mape))
+            precision_15 = float(np.mean(relative_errors <= 0.15))
+            precision_10 = float(np.mean(relative_errors <= 0.10))
+            precision_20 = float(np.mean(relative_errors <= 0.20))
+            reg_accuracy = r2_acc if (r2_val is not None and r2_val > 0) else mape_acc
+
             evaluation = {
-                "mae": float(mean_absolute_error(actual_values, raw_preds[labeled_mask])),
+                "accuracy": reg_accuracy,
+                "precision": precision_15,
+                "tolerance_precision": precision_15,
+                "tolerance_10": precision_10,
+                "tolerance_20": precision_20,
+                "mape": mape,
+                "mae": mae,
                 "mse": mse,
-                "rmse": float(np.sqrt(mse)),
-                "r2": float(r2_score(actual_values, raw_preds[labeled_mask])) if len(actual_values) > 1 else None,
+                "rmse": rmse,
+                "r2": r2_val,
                 "rows": int(labeled_mask.sum()),
             }
         if evaluation is not None:

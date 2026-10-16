@@ -4,10 +4,12 @@ import {
   X, Settings, Upload, Table, Wrench, Layers, Zap, FileText,
   Loader2, CheckCircle2, AlertCircle, ChevronDown, Trophy,
   Download, BarChart2, RefreshCw, ArrowUpRight, PlayCircle, DatabaseZap,
+  Link2, Globe, ExternalLink,
 } from 'lucide-react';
 
 import {
   uploadDataset,
+  uploadDatasetFromUrl,
   analyzeDataset,
   preprocessDataset,
   trainModels,
@@ -133,6 +135,8 @@ const Stat = ({ label, value }) => (
 
 // ─── PANEL: Upload / LoadCSV ──────────────────────────────────────────────────
 const UploadPanel = ({ node, onUpdateNodeData, onDatasetUploaded }) => {
+  const [tab, setTab] = useState(node.data.dataset_url ? 'link' : 'file');
+  const [linkUrl, setLinkUrl] = useState(node.data.dataset_url || '');
   const [loading, setLoading] = useState(false);
   const [status,  setStatus]  = useState(null);
   const fileRef               = useRef(null);
@@ -146,12 +150,15 @@ const UploadPanel = ({ node, onUpdateNodeData, onDatasetUploaded }) => {
     try {
       const result = await uploadDataset(file);
       const info   = {
+        dataset_id:   result.dataset_id,
         file_name:    result.file_name,
         rows:         result.rows,
         columns:      result.columns,
         column_names: result.column_names,
       };
       onUpdateNodeData(node.id, {
+        dataset_id:      result.dataset_id,
+        file_name:       result.file_name,
         uploadedDataset: info,
         status:          'uploaded',
         description:     `${result.rows.toLocaleString()} rows × ${result.columns} cols`,
@@ -167,29 +174,145 @@ const UploadPanel = ({ node, onUpdateNodeData, onDatasetUploaded }) => {
     }
   };
 
+  const handleLinkImport = async () => {
+    const cleanUrl = linkUrl.trim();
+    if (!cleanUrl) return;
+    setLoading(true);
+    setStatus({ type: 'loading', msg: 'Fetching dataset from link…' });
+    try {
+      const result = await uploadDatasetFromUrl(cleanUrl);
+      const info = {
+        dataset_id:   result.dataset_id,
+        file_name:    result.file_name,
+        rows:         result.rows,
+        columns:      result.columns,
+        column_names: result.column_names,
+      };
+      onUpdateNodeData(node.id, {
+        dataset_id:      result.dataset_id,
+        file_name:       result.file_name,
+        dataset_url:     cleanUrl,
+        uploadedDataset: info,
+        status:          'uploaded',
+        description:     `${result.rows.toLocaleString()} rows × ${result.columns} cols`,
+      });
+      onDatasetUploaded(info);
+      setStatus({ type: 'success', msg: `✓ "${result.file_name}" — ${result.rows.toLocaleString()} rows, ${result.columns} cols.` });
+    } catch (err) {
+      setStatus({ type: 'error', msg: err.message });
+      onUpdateNodeData(node.id, { status: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <Field label="Upload Dataset">
-        <div
-          className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors hover:border-primary/50"
-          style={{ borderColor: 'var(--color-border)' }}
-          onClick={() => fileRef.current?.click()}
+      {/* Mode Switch Tabs */}
+      <div className="flex p-1 rounded-xl" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+        <button
+          type="button"
+          onClick={() => setTab('link')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+            tab === 'link' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
         >
-          <Upload className="w-8 h-8 mx-auto mb-2 text-primary/60" />
-          <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-            Click to select a file
-          </p>
-          <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-muted)' }}>
-            CSV or Excel (.xlsx / .xls) · Any number of columns &amp; rows
-          </p>
-          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleUpload} />
-        </div>
-      </Field>
+          <Link2 className="w-3.5 h-3.5" />
+          GitHub / Kaggle Link
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('file')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+            tab === 'file' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Upload className="w-3.5 h-3.5" />
+          Local File
+        </button>
+      </div>
 
-      <ActionBtn onClick={() => fileRef.current?.click()} loading={loading}>
-        {!loading && <Upload className="w-4 h-4" />}
-        {loading ? 'Uploading…' : 'Choose & Upload File'}
-      </ActionBtn>
+      {tab === 'link' ? (
+        <div className="space-y-3">
+          <Field label="Dataset Link (GitHub, Kaggle, Web)">
+            <div className="relative">
+              <Globe className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="url"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://github.com/... or https://www.kaggle.com/datasets/..."
+                className="w-full pl-8 pr-3 py-2 rounded-xl text-xs font-mono border outline-none transition-all focus:border-primary"
+                style={{
+                  background: 'var(--color-bg)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)',
+                }}
+              />
+            </div>
+          </Field>
+
+          {/* Quick presets */}
+          <div>
+            <p className="text-[9px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Quick Presets</p>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={() => setLinkUrl('https://github.com/datasciencedojo/datasets/blob/master/titanic.csv')}
+                className="px-2 py-0.5 rounded text-[10px] border text-slate-300 hover:text-white hover:border-primary transition-all"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                Titanic (GitHub)
+              </button>
+              <button
+                type="button"
+                onClick={() => setLinkUrl('https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv')}
+                className="px-2 py-0.5 rounded text-[10px] border text-slate-300 hover:text-white hover:border-primary transition-all"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                Iris (GitHub)
+              </button>
+              <button
+                type="button"
+                onClick={() => setLinkUrl('https://www.kaggle.com/datasets/heptapod/titanic')}
+                className="px-2 py-0.5 rounded text-[10px] border text-slate-300 hover:text-white hover:border-primary transition-all"
+                style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
+              >
+                Titanic (Kaggle)
+              </button>
+            </div>
+          </div>
+
+          <ActionBtn onClick={handleLinkImport} loading={loading} disabled={!linkUrl.trim()}>
+            {!loading && <ExternalLink className="w-4 h-4" />}
+            {loading ? 'Accessing Dataset Link…' : 'Load Dataset from Link'}
+          </ActionBtn>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Field label="Upload Dataset">
+            <div
+              className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors hover:border-primary/50"
+              style={{ borderColor: 'var(--color-border)' }}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Upload className="w-8 h-8 mx-auto mb-2 text-primary/60" />
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                Click to select a file
+              </p>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                CSV or Excel (.xlsx / .xls) · Any number of columns &amp; rows
+              </p>
+              <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleUpload} />
+            </div>
+          </Field>
+
+          <ActionBtn onClick={() => fileRef.current?.click()} loading={loading}>
+            {!loading && <Upload className="w-4 h-4" />}
+            {loading ? 'Uploading…' : 'Choose & Upload File'}
+          </ActionBtn>
+        </div>
+      )}
 
       {status && <StatusBox type={status.type} message={status.msg} />}
 
